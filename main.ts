@@ -14,6 +14,8 @@ class CLI {
 try {
     const cli = new CLI();
     console.log(`The address saved is: ${cli.address}`);
+    const pubkey = new PublicKey(cli.address);
+    console.log(`The public key is: ${pubkey}`);
 } catch (error: any) {
     console.error(error.message);
 }
