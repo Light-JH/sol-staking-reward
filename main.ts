@@ -13,7 +13,7 @@ class CLI {
 
 async function getTransactionHistory(pubkey: PublicKey) {
     const connection = new Connection('https://api.mainnet-beta.solana.com');
-    const signatures = await connection.getConfirmedSignaturesForAddress2(pubkey, { limit: 10 });
+    const signatures = await connection.getConfirmedSignaturesForAddress2(pubkey, { limit: 10 }, 'finalized');
     for (const signature of signatures) {
         console.log(signature);
     }
