@@ -1,4 +1,4 @@
-import { PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
 
 class CLI {
     address: string;
@@ -11,11 +11,22 @@ class CLI {
     }
 }
 
+async function getTransactionHistory(pubkey: PublicKey) {
+    const connection = new Connection('https://api.mainnet-beta.solana.com');
+    const signatures = await connection.getConfirmedSignaturesForAddress2(pubkey, { limit: 10 });
+    for (const signature of signatures) {
+        console.log(signature);
+    }
+
+}
+
 try {
     const cli = new CLI();
     console.log(`The address saved is: ${cli.address}`);
     const pubkey = new PublicKey(cli.address);
-    console.log(`The public key is: ${pubkey}`);
+    getTransactionHistory(pubkey).then(result => {
+        console.log("success");
+    })
 } catch (error: any) {
     console.error(error.message);
 }
