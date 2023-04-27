@@ -1,4 +1,4 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey, GetVersionedTransactionConfig } from '@solana/web3.js';
 
 class CLI {
     address: string;
@@ -14,17 +14,30 @@ class CLI {
 async function getTransactionHistory(pubkey: PublicKey) {
     const connection = new Connection('https://api.mainnet-beta.solana.com');
     const signatures = await connection.getConfirmedSignaturesForAddress2(pubkey, { limit: 10 }, 'finalized');
-    for (const signature of signatures) {
-        console.log(signature);
-    }
+    return signatures.map(signature => signature.signature);
+}
 
+async function getTranctions(signatures: string[]) {
+    const connection = new Connection('https://api.mainnet-beta.solana.com');
+    const config: GetVersionedTransactionConfig = {
+        commitment: 'finalized',
+        maxSupportedTransactionVersion: 1
+    };
+    return await connection.getParsedTransactions(signatures, config);
+}
+
+async function main(pubkey: PublicKey) {
+    const signatures = await getTransactionHistory(pubkey);
+    const transactions = await getTranctions(signatures);
+    for (const tx of transactions) {
+        console.log(tx);
+    }
 }
 
 try {
     const cli = new CLI();
-    console.log(`The address saved is: ${cli.address}`);
     const pubkey = new PublicKey(cli.address);
-    getTransactionHistory(pubkey).then(result => {
+    main(pubkey).then(result => {
         console.log("success");
     })
 } catch (error: any) {
