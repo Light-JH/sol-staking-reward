@@ -1,5 +1,8 @@
 import { Connection, PublicKey, GetVersionedTransactionConfig } from '@solana/web3.js';
 
+
+const JITO_TIP_DISTRIBUTION_PROGRAM = new PublicKey('4R3gSG8BpU4t19KYj8CfnbtRpnT8gtk4dvTHxVRwc2r7');
+
 class CLI {
     address: string;
 
@@ -30,7 +33,26 @@ async function main(pubkey: PublicKey) {
     const signatures = await getTransactionHistory(pubkey);
     const transactions = await getTransactions(signatures);
     for (const tx of transactions) {
-        console.log(tx);
+        // we expect tip distribution is single instruction
+        if (tx?.transaction.message.instructions.length != 1) {
+            continue
+        }
+        if (!tx?.transaction.message.instructions[0].programId.equals(JITO_TIP_DISTRIBUTION_PROGRAM)) {
+            continue;
+        }
+        const accountIndex = tx?.transaction.message.accountKeys.findIndex((k) => k.pubkey.equals(pubkey));
+        if (accountIndex === -1) {
+            continue
+        }
+        if (tx?.meta?.err) { continue }
+        let postBalances = tx?.meta?.postBalances;
+        let preBalances = tx?.meta?.preBalances;
+        if (!(postBalances && Array.isArray(postBalances)
+            && preBalances && Array.isArray(preBalances))) {
+            continue;
+        }
+        const balance_delta = postBalances[accountIndex] - preBalances[accountIndex];
+        console.log(tx?.blockTime, tx.slot, tx.transaction.signatures[0], balance_delta);
     }
 }
 
