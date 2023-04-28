@@ -17,7 +17,7 @@ async function getTransactionHistory(pubkey: PublicKey) {
     return signatures.map(signature => signature.signature);
 }
 
-async function getTranctions(signatures: string[]) {
+async function getTransactions(signatures: string[]) {
     const connection = new Connection('https://api.mainnet-beta.solana.com');
     const config: GetVersionedTransactionConfig = {
         commitment: 'finalized',
@@ -28,7 +28,7 @@ async function getTranctions(signatures: string[]) {
 
 async function main(pubkey: PublicKey) {
     const signatures = await getTransactionHistory(pubkey);
-    const transactions = await getTranctions(signatures);
+    const transactions = await getTransactions(signatures);
     for (const tx of transactions) {
         console.log(tx);
     }
