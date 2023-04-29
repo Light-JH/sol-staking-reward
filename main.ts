@@ -1,4 +1,4 @@
-import { Connection, PublicKey, GetVersionedTransactionConfig } from '@solana/web3.js';
+import { Connection, PublicKey, GetVersionedTransactionConfig, ParsedTransactionWithMeta } from '@solana/web3.js';
 
 
 const JITO_TIP_DISTRIBUTION_PROGRAM = new PublicKey('4R3gSG8BpU4t19KYj8CfnbtRpnT8gtk4dvTHxVRwc2r7');
@@ -26,27 +26,27 @@ async function getTransactions(signatures: string[]) {
         commitment: 'finalized',
         maxSupportedTransactionVersion: 1
     };
-    return await connection.getParsedTransactions(signatures, config);
+    return ((await connection.getParsedTransactions(signatures, config)))
+        .filter((value): value is ParsedTransactionWithMeta => value !== null);
 }
 
-async function main(pubkey: PublicKey) {
-    const signatures = await getTransactionHistory(pubkey);
-    const transactions = await getTransactions(signatures);
+function getBalanceChanges(pubkey: PublicKey, transactions: ParsedTransactionWithMeta[]) {
+    const balanceChanges = [];
     for (const tx of transactions) {
         // we expect tip distribution is single instruction
-        if (tx?.transaction.message.instructions.length != 1) {
+        if (tx.transaction.message.instructions.length != 1) {
             continue
         }
-        if (!tx?.transaction.message.instructions[0].programId.equals(JITO_TIP_DISTRIBUTION_PROGRAM)) {
+        if (!tx.transaction.message.instructions[0].programId.equals(JITO_TIP_DISTRIBUTION_PROGRAM)) {
             continue;
         }
-        const accountIndex = tx?.transaction.message.accountKeys.findIndex((k) => k.pubkey.equals(pubkey));
+        const accountIndex = tx.transaction.message.accountKeys.findIndex((k) => k.pubkey.equals(pubkey));
         if (accountIndex === -1) {
             continue
         }
-        if (tx?.meta?.err) { continue }
-        let postBalances = tx?.meta?.postBalances;
-        let preBalances = tx?.meta?.preBalances;
+        if (tx.meta?.err) { continue }
+        let postBalances = tx.meta?.postBalances;
+        let preBalances = tx.meta?.preBalances;
         if (!(postBalances && Array.isArray(postBalances)
             && preBalances && Array.isArray(preBalances))) {
             continue;
@@ -54,8 +54,16 @@ async function main(pubkey: PublicKey) {
         const balance_delta = postBalances[accountIndex] - preBalances[accountIndex];
         const blockTime = tx.blockTime;
         if (!blockTime) { console.log('missing blocktime'); continue }
-        console.log(new Date(blockTime * 1000), tx.slot, tx.transaction.signatures[0], balance_delta);
+        balanceChanges.push([new Date(blockTime * 1000), tx.slot, tx.transaction.signatures[0], balance_delta]);
     }
+    return balanceChanges;
+}
+
+async function main(pubkey: PublicKey) {
+    const signatures = await getTransactionHistory(pubkey);
+    const transactions = await getTransactions(signatures);
+    const balanceChanges = getBalanceChanges(pubkey, transactions);
+    console.log(balanceChanges)
 }
 
 try {
