@@ -52,7 +52,9 @@ async function main(pubkey: PublicKey) {
             continue;
         }
         const balance_delta = postBalances[accountIndex] - preBalances[accountIndex];
-        console.log(tx?.blockTime, tx.slot, tx.transaction.signatures[0], balance_delta);
+        const blockTime = tx.blockTime;
+        if (!blockTime) { console.log('missing blocktime'); continue }
+        console.log(new Date(blockTime * 1000), tx.slot, tx.transaction.signatures[0], balance_delta);
     }
 }
 
