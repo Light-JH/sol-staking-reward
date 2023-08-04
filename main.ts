@@ -1,6 +1,5 @@
 import { Connection, PublicKey, GetVersionedTransactionConfig, ParsedTransactionWithMeta } from '@solana/web3.js';
 
-
 const JITO_TIP_DISTRIBUTION_PROGRAM = new PublicKey('4R3gSG8BpU4t19KYj8CfnbtRpnT8gtk4dvTHxVRwc2r7');
 
 class CLI {
@@ -60,7 +59,9 @@ function getBalanceChanges(pubkey: PublicKey, transactions: ParsedTransactionWit
 }
 
 async function main(pubkey: PublicKey) {
+    //  signature of each transaction tx = (message, signature ), UNIQUE identifier of the tx, use to query tx
     const signatures = await getTransactionHistory(pubkey);
+    // get the actual tx
     const transactions = await getTransactions(signatures);
     const balanceChanges = getBalanceChanges(pubkey, transactions);
     console.log(balanceChanges)
