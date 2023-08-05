@@ -67,12 +67,33 @@ async function main(pubkey: PublicKey) {
     console.log(balanceChanges)
 }
 
-try {
-    const cli = new CLI();
-    const pubkey = new PublicKey(cli.address);
-    main(pubkey).then(result => {
-        console.log("success");
-    })
-} catch (error: any) {
-    console.error(error.message);
+import axios from 'axios';
+
+async function fetchData(url: string) {
+    try {
+        const response = await axios.get(url);
+        return response.data;
+    } catch (error) {
+        console.error('Error fetching data:', error);
+        return null;
+    }
 }
+
+const apiUrl = 'https://jsonplaceholder.typicode.com/posts/1';
+fetchData(apiUrl)
+    .then(data => {
+        if (data) {
+            console.log('Fetched data:', data);
+        }
+    });
+
+
+// try {
+//     const cli = new CLI();
+//     const pubkey = new PublicKey(cli.address);
+//     main(pubkey).then(result => {
+//         console.log("success");
+//     })
+// } catch (error: any) {
+//     console.error(error.message);
+// }
