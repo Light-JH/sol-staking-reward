@@ -1,4 +1,4 @@
-import { Connection, PublicKey, GetVersionedTransactionConfig, ParsedTransactionWithMeta } from '@solana/web3.js';
+import { Connection, PublicKey, GetVersionedTransactionConfig, ParsedTransactionWithMeta, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 const JITO_TIP_DISTRIBUTION_PROGRAM = new PublicKey('4R3gSG8BpU4t19KYj8CfnbtRpnT8gtk4dvTHxVRwc2r7');
 
@@ -64,14 +64,50 @@ async function main(pubkey: PublicKey) {
     // get the actual tx
     const transactions = await getTransactions(signatures);
     const balanceChanges = getBalanceChanges(pubkey, transactions);
-    console.log(balanceChanges)
+    console.log(balanceChanges);
+
+
+    console.log('fetching from coinAPI...');
+    const apiKey = process.env.API_KEY;
+    const apiUrl = 'https://rest.coinapi.io/v1/ohlcv/COINBASE_SPOT_SOL_USD/history'
+    for (var balanceChange of balanceChanges) {
+        const time_start = balanceChange[0]; // time of taxable event
+        const args = {
+            headers: { "X-CoinAPI-Key": apiKey },
+            params: {
+                "period_id": "15MIN",
+                "limit": 1,
+                "time_start": time_start,
+            }
+        };
+
+        const response = await fetchData(apiUrl, args)
+        if (!response) { throw new Error("failed to retrieve candle"); }
+        if (response.length === 0) { throw new Error("no data for time"); }
+
+        const data = response[0];
+        const price = 0.25 * (data.price_open + data.price_close + data.price_high + data.price_low);
+        const tmp: unknown = balanceChange[3];
+        const lamports = tmp as number;
+        const value_in_usd = lamports * price / LAMPORTS_PER_SOL;
+
+        const new_result = [
+            balanceChange[0], balanceChange[1], balanceChange[2], balanceChange[3],
+            price,
+            value_in_usd,
+        ];
+        console.log(new_result);
+    }
+
+
+
+    // return balanceChanges;
 }
 
 import axios from 'axios';
-
-async function fetchData(url: string) {
+async function fetchData(url: string, headers: any) {
     try {
-        const response = await axios.get(url);
+        const response = await axios.get(url, headers);
         return response.data;
     } catch (error) {
         console.error('Error fetching data:', error);
@@ -79,21 +115,25 @@ async function fetchData(url: string) {
     }
 }
 
-const apiUrl = 'https://jsonplaceholder.typicode.com/posts/1';
-fetchData(apiUrl)
-    .then(data => {
-        if (data) {
-            console.log('Fetched data:', data);
-        }
-    });
+try {
+    const cli = new CLI();
+    const pubkey = new PublicKey(cli.address);
+    main(pubkey).then(result => {
+        console.log("success");
 
 
-// try {
-//     const cli = new CLI();
-//     const pubkey = new PublicKey(cli.address);
-//     main(pubkey).then(result => {
-//         console.log("success");
-//     })
-// } catch (error: any) {
-//     console.error(error.message);
-// }
+        // fetchData("https://rest.coinapi.io/v1/symbols", { headers: { " X-CoinAPI-Key": apiKey } }).then(data => {
+        //     for (var symbol of data) {
+        //         if (symbol.symbol_type !== 'SPOT') { continue; }
+        //         if (!symbol.symbol_id.includes("SOL")) { continue; }
+        //         if (!symbol.symbol_id.includes("USD")) { continue; }
+        //         console.log(symbol);
+        //     }
+        // });
+
+
+    })
+
+} catch (error: any) {
+    console.error(error.message);
+}
