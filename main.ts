@@ -45,7 +45,6 @@ class BalanceChange {
 }
 
 function getBalanceChanges(pubkey: PublicKey, transactions: ParsedTransactionWithMeta[]): BalanceChange[] {
-
     const balanceChanges = [];
     for (const tx of transactions) {
         // we expect tip distribution is single instruction
@@ -75,6 +74,30 @@ function getBalanceChanges(pubkey: PublicKey, transactions: ParsedTransactionWit
     return balanceChanges;
 }
 
+class BalanceChangeUSD {
+    blocktime: Date;
+    slot: number;
+    signature: string;
+    balance_delta: number;
+    value_in_usd: number;
+    price: number;
+    time_period_start: Date;
+    time_period_end: Date;
+
+
+    // Constructor
+    constructor(balanceChange: BalanceChange, time_period_start: Date, time_period_end: Date, price: number, value_in_usd: number) {
+        this.blocktime = balanceChange.blocktime;
+        this.slot = balanceChange.slot;
+        this.signature = balanceChange.signature;
+        this.balance_delta = balanceChange.balance_delta;
+        this.price = price;
+        this.value_in_usd = value_in_usd;
+        this.time_period_start = time_period_start;
+        this.time_period_end = time_period_end;
+    }
+}
+
 async function main(pubkey: PublicKey) {
     //  signature of each transaction tx = (message, signature ), UNIQUE identifier of the tx, use to query tx
     const signatures = await getTransactionHistory(pubkey);
@@ -92,8 +115,7 @@ async function main(pubkey: PublicKey) {
         const args = {
             headers: { "X-CoinAPI-Key": apiKey },
             params: {
-                "period_id": "15MIN",
-                "limit": 1,
+                "period_id": "1HRS",
                 "time_start": time_start,
             }
         };
@@ -102,23 +124,15 @@ async function main(pubkey: PublicKey) {
         if (!response) { throw new Error("failed to retrieve candle"); }
         if (response.length === 0) { throw new Error("no data for time"); }
 
-        const data = response[0];
+        const data = response[0]; // take the first candle
+        const time_period_start = new Date(data.time_period_start);
+        const time_period_end = new Date(data.time_period_end);
         const price = 0.25 * (data.price_open + data.price_close + data.price_high + data.price_low);
-        const tmp: unknown = balanceChange.slot;
-        const lamports = tmp as number;
-        const value_in_usd = lamports * price / LAMPORTS_PER_SOL;
+        const value_in_usd = balanceChange.balance_delta * price / LAMPORTS_PER_SOL;
 
-        const new_result = [
-            balanceChange.balance_delta, balanceChange.blocktime, balanceChange.signature, balanceChange.slot,
-            price,
-            value_in_usd,
-        ];
-        console.log(new_result);
+        const balanceChangeUSD = new BalanceChangeUSD(balanceChange, time_period_start, time_period_end, price, value_in_usd)
+        console.log(balanceChangeUSD);
     }
-
-
-
-    // return balanceChanges;
 }
 
 import axios from 'axios';
