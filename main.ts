@@ -29,7 +29,23 @@ async function getTransactions(signatures: string[]) {
         .filter((value): value is ParsedTransactionWithMeta => value !== null);
 }
 
-function getBalanceChanges(pubkey: PublicKey, transactions: ParsedTransactionWithMeta[]) {
+class BalanceChange {
+    blocktime: Date;
+    slot: number;
+    signature: string;
+    balance_delta: number;
+
+    // Constructor
+    constructor(blocktime: Date, slot: number, signature: string, balance_delta: number) {
+        this.blocktime = blocktime;
+        this.slot = slot;
+        this.signature = signature;
+        this.balance_delta = balance_delta;
+    }
+}
+
+function getBalanceChanges(pubkey: PublicKey, transactions: ParsedTransactionWithMeta[]): BalanceChange[] {
+
     const balanceChanges = [];
     for (const tx of transactions) {
         // we expect tip distribution is single instruction
@@ -53,7 +69,8 @@ function getBalanceChanges(pubkey: PublicKey, transactions: ParsedTransactionWit
         const balance_delta = postBalances[accountIndex] - preBalances[accountIndex];
         const blockTime = tx.blockTime;
         if (!blockTime) { console.log('missing blocktime'); continue }
-        balanceChanges.push([new Date(blockTime * 1000), tx.slot, tx.transaction.signatures[0], balance_delta]);
+        const balanceChange = new BalanceChange(new Date(blockTime * 1000), tx.slot, tx.transaction.signatures[0], balance_delta);
+        balanceChanges.push(balanceChange);
     }
     return balanceChanges;
 }
@@ -71,7 +88,7 @@ async function main(pubkey: PublicKey) {
     const apiKey = process.env.API_KEY;
     const apiUrl = 'https://rest.coinapi.io/v1/ohlcv/COINBASE_SPOT_SOL_USD/history'
     for (var balanceChange of balanceChanges) {
-        const time_start = balanceChange[0]; // time of taxable event
+        const time_start = balanceChange.blocktime;
         const args = {
             headers: { "X-CoinAPI-Key": apiKey },
             params: {
@@ -87,12 +104,12 @@ async function main(pubkey: PublicKey) {
 
         const data = response[0];
         const price = 0.25 * (data.price_open + data.price_close + data.price_high + data.price_low);
-        const tmp: unknown = balanceChange[3];
+        const tmp: unknown = balanceChange.slot;
         const lamports = tmp as number;
         const value_in_usd = lamports * price / LAMPORTS_PER_SOL;
 
         const new_result = [
-            balanceChange[0], balanceChange[1], balanceChange[2], balanceChange[3],
+            balanceChange.balance_delta, balanceChange.blocktime, balanceChange.signature, balanceChange.slot,
             price,
             value_in_usd,
         ];
