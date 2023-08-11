@@ -1,4 +1,5 @@
-import { Connection, PublicKey, GetVersionedTransactionConfig, ParsedTransactionWithMeta, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, PublicKey, GetVersionedTransactionConfig, ParsedTransactionWithMeta, LAMPORTS_PER_SOL, EpochSchedule } from '@solana/web3.js';
+import { NumericLiteral } from 'typescript';
 
 const JITO_TIP_DISTRIBUTION_PROGRAM = new PublicKey('4R3gSG8BpU4t19KYj8CfnbtRpnT8gtk4dvTHxVRwc2r7');
 
@@ -27,6 +28,38 @@ async function getTransactions(signatures: string[]) {
     };
     return ((await connection.getParsedTransactions(signatures, config)))
         .filter((value): value is ParsedTransactionWithMeta => value !== null);
+}
+
+async function getInflationReward(pubkey: PublicKey) {
+    const connection = new Connection('https://api.mainnet-beta.solana.com');
+    // TODO: This only works if the stake account is active. Fix this.
+    var epoch = (await connection.getEpochInfo()).epoch - 1;
+    const epochs = [];
+    while (true) {
+        const reward = await connection.getInflationReward([pubkey], epoch);
+        if (!reward) { break; }
+        if (!reward[0]) { break; }
+        const blockTime = await connection.getBlockTime(reward[0].effectiveSlot);
+        console.log(blockTime);
+        // const reward1 = new Reward(reward[0].amount, reward[0].effectiveSlot, blockTime)
+        // epochs.push(reward1);
+        epoch -= 1;
+        break;
+    }
+
+    // console.log(epochs);
+
+}
+class Reward {
+    amount: number;
+    effectiveSlot: number;
+    timeblock: number;
+    constructor(amount: number, effectiveSlot: number, timeblock: number) {
+        this.amount = amount;
+        this.effectiveSlot = effectiveSlot;
+        this.timeblock = timeblock;
+    }
+
 }
 
 class BalanceChange {
@@ -99,60 +132,63 @@ class BalanceChangeUSD {
 }
 
 async function main(pubkey: PublicKey) {
-    //  signature of each transaction tx = (message, signature ), UNIQUE identifier of the tx, use to query tx
-    const signatures = await getTransactionHistory(pubkey);
-    // get the actual tx
-    const transactions = await getTransactions(signatures);
-    const balanceChanges = getBalanceChanges(pubkey, transactions);
-    console.log(balanceChanges);
+    const activationData = await getInflationReward(pubkey);
 
 
-    console.log('fetching from coinAPI...');
-    const apiKey = process.env.API_KEY;
-    const apiUrl = 'https://rest.coinapi.io/v1/ohlcv/COINBASE_SPOT_SOL_USD/history'
-    for (var balanceChange of balanceChanges) {
-        const time_start = balanceChange.blocktime;
-        const args = {
-            headers: { "X-CoinAPI-Key": apiKey },
-            params: {
-                "period_id": "1HRS",
-                "time_start": time_start,
-            }
-        };
-
-        const response = await fetchData(apiUrl, args)
-        if (!response) { throw new Error("failed to retrieve candle"); }
-        if (response.length === 0) { throw new Error("no data for time"); }
-
-        const data = response[0]; // take the first candle
-        const time_period_start = new Date(data.time_period_start);
-        const time_period_end = new Date(data.time_period_end);
-        const price = 0.25 * (data.price_open + data.price_close + data.price_high + data.price_low);
-        const value_in_usd = balanceChange.balance_delta * price / LAMPORTS_PER_SOL;
-
-        const balanceChangeUSD = new BalanceChangeUSD(balanceChange, time_period_start, time_period_end, price, value_in_usd)
-        console.log(balanceChangeUSD);
-    }
 }
+// async function main(pubkey: PublicKey) {
+//     //  signature of each transaction tx = (message, signature ), UNIQUE identifier of the tx, use to query tx
+//     const signatures = await getTransactionHistory(pubkey);
+//     // get the actual tx
+//     const transactions = await getTransactions(signatures);
+//     const balanceChanges = getBalanceChanges(pubkey, transactions);
+//     console.log(balanceChanges);
 
-import axios from 'axios';
-async function fetchData(url: string, headers: any) {
-    try {
-        const response = await axios.get(url, headers);
-        return response.data;
-    } catch (error) {
-        console.error('Error fetching data:', error);
-        return null;
-    }
-}
+
+//     console.log('fetching from coinAPI...');
+//     const apiKey = process.env.API_KEY;
+//     const apiUrl = 'https://rest.coinapi.io/v1/ohlcv/COINBASE_SPOT_SOL_USD/history'
+//     for (var balanceChange of balanceChanges) {
+//         const time_start = balanceChange.blocktime;
+//         const args = {
+//             headers: { "X-CoinAPI-Key": apiKey },
+//             params: {
+//                 "period_id": "1HRS",
+//                 "time_start": time_start,
+//             }
+//         };
+
+//         const response = await fetchData(apiUrl, args)
+//         if (!response) { throw new Error("failed to retrieve candle"); }
+//         if (response.length === 0) { throw new Error("no data for time"); }
+
+//         const data = response[0]; // take the first candle
+//         const time_period_start = new Date(data.time_period_start);
+//         const time_period_end = new Date(data.time_period_end);
+//         const price = 0.25 * (data.price_open + data.price_close + data.price_high + data.price_low);
+//         const value_in_usd = balanceChange.balance_delta * price / LAMPORTS_PER_SOL;
+
+//         const balanceChangeUSD = new BalanceChangeUSD(balanceChange, time_period_start, time_period_end, price, value_in_usd)
+//         console.log(balanceChangeUSD);
+//     }
+// }
+
+// import axios from 'axios';
+// async function fetchData(url: string, headers: any) {
+//     try {
+//         const response = await axios.get(url, headers);
+//         return response.data;
+//     } catch (error) {
+//         console.error('Error fetching data:', error);
+//         return null;
+//     }
+// }
 
 try {
     const cli = new CLI();
     const pubkey = new PublicKey(cli.address);
     main(pubkey).then(result => {
         console.log("success");
-
-
         // fetchData("https://rest.coinapi.io/v1/symbols", { headers: { " X-CoinAPI-Key": apiKey } }).then(data => {
         //     for (var symbol of data) {
         //         if (symbol.symbol_type !== 'SPOT') { continue; }
@@ -161,8 +197,6 @@ try {
         //         console.log(symbol);
         //     }
         // });
-
-
     })
 
 } catch (error: any) {
