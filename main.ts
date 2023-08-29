@@ -1,6 +1,8 @@
 import { Connection, PublicKey, GetVersionedTransactionConfig, ParsedTransactionWithMeta, LAMPORTS_PER_SOL, EpochSchedule } from '@solana/web3.js';
 import { NumericLiteral } from 'typescript';
+import axios from 'axios';
 
+// this is where the tips come from
 const JITO_TIP_DISTRIBUTION_PROGRAM = new PublicKey('4R3gSG8BpU4t19KYj8CfnbtRpnT8gtk4dvTHxVRwc2r7');
 
 class CLI {
@@ -34,47 +36,34 @@ async function getInflationReward(pubkey: PublicKey) {
     const connection = new Connection('https://api.mainnet-beta.solana.com');
     // TODO: This only works if the stake account is active. Fix this.
     var epoch = (await connection.getEpochInfo()).epoch - 1;
-    const epochs = [];
+    var epochs = [];
     while (true) {
+        console.log("retrieving epoch rewards for ", epoch);
         const reward = await connection.getInflationReward([pubkey], epoch);
         if (!reward) { break; }
         if (!reward[0]) { break; }
         const blockTime = await connection.getBlockTime(reward[0].effectiveSlot);
-        console.log(blockTime);
-        // const reward1 = new Reward(reward[0].amount, reward[0].effectiveSlot, blockTime)
-        // epochs.push(reward1);
+        if (!blockTime) { break; }
+        const reward1 = new Reward(reward[0].amount, epoch, reward[0].effectiveSlot, blockTime)
+        epochs.push(reward1);
         epoch -= 1;
-        break;
     }
 
-    // console.log(epochs);
-
-}
-class Reward {
-    amount: number;
-    effectiveSlot: number;
-    timeblock: number;
-    constructor(amount: number, effectiveSlot: number, timeblock: number) {
-        this.amount = amount;
-        this.effectiveSlot = effectiveSlot;
-        this.timeblock = timeblock;
-    }
-
+    return epochs;
 }
 
-class BalanceChange {
-    blocktime: Date;
-    slot: number;
-    signature: string;
-    balance_delta: number;
+function convertInflationRewards(inflationRewards: Reward[]): BalanceChange[] {
+    return inflationRewards.map(reward => {
+        return new BalanceChange(new Date(reward.blocktime * 1000), reward.effectiveSlot, reward.epoch.toString(), reward.amount);
+    });
+}
 
-    // Constructor
-    constructor(blocktime: Date, slot: number, signature: string, balance_delta: number) {
-        this.blocktime = blocktime;
-        this.slot = slot;
-        this.signature = signature;
-        this.balance_delta = balance_delta;
-    }
+async function getJitoRewards(pubkey: PublicKey) {
+    //  signature of each transaction tx = (message, signature ), UNIQUE identifier of the tx, use to query tx
+    const signatures = await getTransactionHistory(pubkey);
+    // get the actual tx
+    const transactions = await getTransactions(signatures);
+    return getBalanceChanges(pubkey, transactions);
 }
 
 function getBalanceChanges(pubkey: PublicKey, transactions: ParsedTransactionWithMeta[]): BalanceChange[] {
@@ -107,6 +96,77 @@ function getBalanceChanges(pubkey: PublicKey, transactions: ParsedTransactionWit
     return balanceChanges;
 }
 
+async function fetchAndConvertToUSD(balanceChanges: BalanceChange[]) {
+    console.log('fetching from coinAPI...');
+    const apiKey = process.env.API_KEY;
+    const apiUrl = 'https://rest.coinapi.io/v1/ohlcv/COINBASE_SPOT_SOL_USD/history'
+    var balanceChangesUSD = [];
+    for (var balanceChange of balanceChanges) {
+        const time_start = balanceChange.blocktime;
+        const args = {
+            headers: { "X-CoinAPI-Key": apiKey },
+            params: {
+                "period_id": "1HRS",
+                "time_start": time_start,
+            }
+        };
+
+        const response = await fetchData(apiUrl, args)
+        if (!response) { throw new Error("failed to retrieve candle"); }
+        if (response.length === 0) { throw new Error("no data for time"); }
+
+        const data = response[0]; // take the first candle
+        const time_period_start = new Date(data.time_period_start);
+        const time_period_end = new Date(data.time_period_end);
+        const price = 0.25 * (data.price_open + data.price_close + data.price_high + data.price_low);
+        const value_in_usd = balanceChange.balance_delta * price / LAMPORTS_PER_SOL;
+
+        const balanceChangeUSD = new BalanceChangeUSD(balanceChange, time_period_start, time_period_end, price, value_in_usd)
+        balanceChangesUSD.push(balanceChangeUSD);
+    }
+
+    return balanceChangesUSD;
+}
+
+async function fetchData(url: string, headers: any) {
+    try {
+        const response = await axios.get(url, headers);
+        return response.data;
+    } catch (error) {
+        console.error('Error fetching data:', error);
+        return null;
+    }
+}
+
+
+class Reward {
+    amount: number;
+    epoch: number;
+    effectiveSlot: number;
+    blocktime: number;
+    constructor(amount: number, epoch: number, effectiveSlot: number, blocktime: number) {
+        this.amount = amount;
+        this.epoch = epoch;
+        this.effectiveSlot = effectiveSlot;
+        this.blocktime = blocktime;
+    }
+}
+
+class BalanceChange {
+    blocktime: Date;
+    slot: number;
+    signature: string;
+    balance_delta: number;
+
+    // Constructor
+    constructor(blocktime: Date, slot: number, signature: string, balance_delta: number) {
+        this.blocktime = blocktime;
+        this.slot = slot;
+        this.signature = signature;
+        this.balance_delta = balance_delta;
+    }
+}
+
 class BalanceChangeUSD {
     blocktime: Date;
     slot: number;
@@ -132,9 +192,13 @@ class BalanceChangeUSD {
 }
 
 async function main(pubkey: PublicKey) {
-    const activationData = await getInflationReward(pubkey);
+    const inflationRewards = await getInflationReward(pubkey);
+    const jitoRewards = await getJitoRewards(pubkey);
+    const inflationBalanceChanges = convertInflationRewards(inflationRewards);
 
-
+    const rewards = inflationBalanceChanges.concat(jitoRewards);
+    const rewardsUSD = fetchAndConvertToUSD(rewards);
+    console.log(rewardsUSD);
 }
 // async function main(pubkey: PublicKey) {
 //     //  signature of each transaction tx = (message, signature ), UNIQUE identifier of the tx, use to query tx
@@ -170,17 +234,6 @@ async function main(pubkey: PublicKey) {
 
 //         const balanceChangeUSD = new BalanceChangeUSD(balanceChange, time_period_start, time_period_end, price, value_in_usd)
 //         console.log(balanceChangeUSD);
-//     }
-// }
-
-// import axios from 'axios';
-// async function fetchData(url: string, headers: any) {
-//     try {
-//         const response = await axios.get(url, headers);
-//         return response.data;
-//     } catch (error) {
-//         console.error('Error fetching data:', error);
-//         return null;
 //     }
 // }
 
