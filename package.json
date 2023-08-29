@@ -6,6 +6,7 @@
   "dependencies": {
     "@solana/web3.js": "^1.75.0",
     "axios": "^1.4.0",
+    "csv-writer": "^1.6.0",
     "ts-node": "^10.9.1"
   }
 }

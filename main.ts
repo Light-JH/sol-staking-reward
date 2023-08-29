@@ -1,6 +1,10 @@
 import { Connection, PublicKey, GetVersionedTransactionConfig, ParsedTransactionWithMeta, LAMPORTS_PER_SOL, EpochSchedule } from '@solana/web3.js';
 import { NumericLiteral } from 'typescript';
 import axios from 'axios';
+import * as fs from 'fs';
+import * as csvParser from 'csv-parser';
+import { createObjectCsvWriter, ObjectCsvWriterParams } from 'csv-writer';
+
 
 // this is where the tips come from
 const JITO_TIP_DISTRIBUTION_PROGRAM = new PublicKey('4R3gSG8BpU4t19KYj8CfnbtRpnT8gtk4dvTHxVRwc2r7');
@@ -31,12 +35,70 @@ async function getTransactions(signatures: string[]) {
     return ((await connection.getParsedTransactions(signatures, config)))
         .filter((value): value is ParsedTransactionWithMeta => value !== null);
 }
+// Define the CSV header
+const csvHeader = [
+    { id: 'amount', title: 'amount' },
+    { id: 'epoch', title: 'epoch' },
+    { id: 'effectiveSlot', title: 'effectiveSlot' },
+    { id: 'blockTime', title: 'blockTime' },
+];
 
-async function getInflationReward(pubkey: PublicKey) {
+// Define the path to the existing CSV file
+const existingCsvFilePath = 'inflationReward.csv';
+
+// Create a function to set up the CSV writer
+function createCsvWriter(): any {
+    return createObjectCsvWriter({
+        path: 'inflationReward.csv',
+        header: csvHeader,
+        append: true, // Set append to true to append data to the existing file
+    } as ObjectCsvWriterParams<Reward>);
+}
+
+function appendToCsv(data: Reward) {
+    // Read the existing CSV file and append the new data
+    fs.createReadStream(existingCsvFilePath)
+        .pipe(csvParser())
+        .on('data', (row) => {
+            // You can process the existing data if needed
+        })
+        .on('end', () => {
+            // Append the new data to the CSV file
+            const csvWriter = createObjectCsvWriter({
+                path: existingCsvFilePath,
+                header: [
+                    { id: 'amount', title: 'amount' },
+                    { id: 'epoch', title: 'epoch' },
+                    { id: 'effectiveSlot', title: 'effectiveSlot' },
+                    { id: 'blockTime', title: 'blockTime' },
+                ],
+                append: true, // Set append to true to append data to the existing file
+            });
+
+            csvWriter.writeRecords([data])
+                .then(() => {
+                    console.log('Reward appended to CSV file successfully');
+                })
+                .catch((error) => {
+                    console.error('Error appending reward to CSV file:', error);
+                });
+        });
+}
+
+
+async function getInflationReward(pubkey: PublicKey, minEpoch: number) {
     const connection = new Connection('https://api.mainnet-beta.solana.com');
     // TODO: This only works if the stake account is active. Fix this.
     var epoch = (await connection.getEpochInfo()).epoch - 1;
-    var epochs = [];
+    // Define the CSV header and data
+    const csvHeader = [
+        { id: 'amount', title: 'amount' },
+        { id: 'epoch', title: 'epoch' },
+        { id: 'effectiveSlot', title: 'effectiveSlot' },
+        { id: 'blockTime', title: 'blockTime' },
+    ];
+
+
     while (true) {
         console.log("retrieving epoch rewards for ", epoch);
         const reward = await connection.getInflationReward([pubkey], epoch);
@@ -45,11 +107,10 @@ async function getInflationReward(pubkey: PublicKey) {
         const blockTime = await connection.getBlockTime(reward[0].effectiveSlot);
         if (!blockTime) { break; }
         const reward1 = new Reward(reward[0].amount, epoch, reward[0].effectiveSlot, blockTime)
-        epochs.push(reward1);
+        appendToCsv(reward1);
+        if (epoch <= minEpoch) { break; }
         epoch -= 1;
     }
-
-    return epochs;
 }
 
 function convertInflationRewards(inflationRewards: Reward[]): BalanceChange[] {
@@ -191,8 +252,8 @@ class BalanceChangeUSD {
     }
 }
 
-async function main(pubkey: PublicKey) {
-    const inflationRewards = await getInflationReward(pubkey);
+async function main(pubkey: PublicKey, MaxEpochinfile: number) {
+    const inflationRewards = await getInflationReward(pubkey, MaxEpochinfile);
     const jitoRewards = await getJitoRewards(pubkey);
     const inflationBalanceChanges = convertInflationRewards(inflationRewards);
 
