@@ -2,8 +2,7 @@ import { Connection, PublicKey, GetVersionedTransactionConfig, ParsedTransaction
 import { NumericLiteral } from 'typescript';
 import axios from 'axios';
 import * as fs from 'fs';
-import * as csvParser from 'csv-parser';
-import { createObjectCsvWriter, ObjectCsvWriterParams } from 'csv-writer';
+import { createObjectCsvWriter } from 'csv-writer';
 
 
 // this is where the tips come from
@@ -11,18 +10,31 @@ const JITO_TIP_DISTRIBUTION_PROGRAM = new PublicKey('4R3gSG8BpU4t19KYj8CfnbtRpnT
 
 class CLI {
     address: string;
+    maxEpochInCsv: number;
+    latestSignature: string | null;
 
     constructor() {
-        if (process.argv.length < 3) {
+        if (process.argv.length < 4) {
             throw new Error('Missing address argument');
         }
         this.address = process.argv[2];
+        this.maxEpochInCsv = parseInt(process.argv[3]);
+
+        if (process.argv.length === 5) {
+            this.latestSignature = process.argv[4];
+        } else {
+            this.latestSignature = null;
+        }
     }
 }
 
-async function getTransactionHistory(pubkey: PublicKey) {
+async function getTransactionHistory(pubkey: PublicKey, latestSignature: string | null) {
     const connection = new Connection('https://api.mainnet-beta.solana.com');
-    const signatures = await connection.getConfirmedSignaturesForAddress2(pubkey, { limit: 10 }, 'finalized');
+    // Create options object with or without the 'until' property
+    const options = latestSignature
+        ? { until: latestSignature }
+        : undefined;
+    const signatures = await connection.getConfirmedSignaturesForAddress2(pubkey, options, 'finalized');
     return signatures.map(signature => signature.signature);
 }
 
@@ -35,71 +47,15 @@ async function getTransactions(signatures: string[]) {
     return ((await connection.getParsedTransactions(signatures, config)))
         .filter((value): value is ParsedTransactionWithMeta => value !== null);
 }
-// Define the CSV header
-const csvHeader = [
-    { id: 'amount', title: 'amount' },
-    { id: 'epoch', title: 'epoch' },
-    { id: 'effectiveSlot', title: 'effectiveSlot' },
-    { id: 'blockTime', title: 'blockTime' },
-];
 
-// Define the path to the existing CSV file
-const existingCsvFilePath = 'inflationReward.csv';
-
-// Create a function to set up the CSV writer
-function createCsvWriter(): any {
-    return createObjectCsvWriter({
-        path: 'inflationReward.csv',
-        header: csvHeader,
-        append: true, // Set append to true to append data to the existing file
-    } as ObjectCsvWriterParams<Reward>);
-}
-
-function appendToCsv(data: Reward) {
-    // Read the existing CSV file and append the new data
-    fs.createReadStream(existingCsvFilePath)
-        .pipe(csvParser())
-        .on('data', (row) => {
-            // You can process the existing data if needed
-        })
-        .on('end', () => {
-            // Append the new data to the CSV file
-            const csvWriter = createObjectCsvWriter({
-                path: existingCsvFilePath,
-                header: [
-                    { id: 'amount', title: 'amount' },
-                    { id: 'epoch', title: 'epoch' },
-                    { id: 'effectiveSlot', title: 'effectiveSlot' },
-                    { id: 'blockTime', title: 'blockTime' },
-                ],
-                append: true, // Set append to true to append data to the existing file
-            });
-
-            csvWriter.writeRecords([data])
-                .then(() => {
-                    console.log('Reward appended to CSV file successfully');
-                })
-                .catch((error) => {
-                    console.error('Error appending reward to CSV file:', error);
-                });
-        });
-}
-
-
-async function getInflationReward(pubkey: PublicKey, minEpoch: number) {
+async function getNewInflationRewards(pubkey: PublicKey, minEpoch: number) {
     const connection = new Connection('https://api.mainnet-beta.solana.com');
     // TODO: This only works if the stake account is active. Fix this.
     var epoch = (await connection.getEpochInfo()).epoch - 1;
-    // Define the CSV header and data
-    const csvHeader = [
-        { id: 'amount', title: 'amount' },
-        { id: 'epoch', title: 'epoch' },
-        { id: 'effectiveSlot', title: 'effectiveSlot' },
-        { id: 'blockTime', title: 'blockTime' },
-    ];
 
-
+    var rewards = [];
     while (true) {
+        if (epoch <= minEpoch) { break; }
         console.log("retrieving epoch rewards for ", epoch);
         const reward = await connection.getInflationReward([pubkey], epoch);
         if (!reward) { break; }
@@ -107,10 +63,11 @@ async function getInflationReward(pubkey: PublicKey, minEpoch: number) {
         const blockTime = await connection.getBlockTime(reward[0].effectiveSlot);
         if (!blockTime) { break; }
         const reward1 = new Reward(reward[0].amount, epoch, reward[0].effectiveSlot, blockTime)
-        appendToCsv(reward1);
-        if (epoch <= minEpoch) { break; }
+        rewards.push(reward1);
         epoch -= 1;
     }
+
+    return rewards;
 }
 
 function convertInflationRewards(inflationRewards: Reward[]): BalanceChange[] {
@@ -119,9 +76,9 @@ function convertInflationRewards(inflationRewards: Reward[]): BalanceChange[] {
     });
 }
 
-async function getJitoRewards(pubkey: PublicKey) {
+async function getJitoBalanceChanges(pubkey: PublicKey, latestSignature: string | null) {
     //  signature of each transaction tx = (message, signature ), UNIQUE identifier of the tx, use to query tx
-    const signatures = await getTransactionHistory(pubkey);
+    const signatures = await getTransactionHistory(pubkey, latestSignature);
     // get the actual tx
     const transactions = await getTransactions(signatures);
     return getBalanceChanges(pubkey, transactions);
@@ -252,65 +209,50 @@ class BalanceChangeUSD {
     }
 }
 
-async function main(pubkey: PublicKey, MaxEpochinfile: number) {
-    const inflationRewards = await getInflationReward(pubkey, MaxEpochinfile);
-    const jitoRewards = await getJitoRewards(pubkey);
-    const inflationBalanceChanges = convertInflationRewards(inflationRewards);
+function writeBalanceChangesUSDToCsv(balanceChangesUSD: BalanceChangeUSD[], file_path: string) {
+    // Define the CSV header and data
+    const csvHeader = [
+        { id: 'blocktime', title: 'blocktime' },
+        { id: 'slot', title: 'slot' },
+        { id: 'signature', title: 'signature' },
+        { id: 'balance_delta', title: 'balance_delta' },
+        { id: 'value_in_usd', title: 'value_in_usd' },
+        { id: 'price', title: 'price' },
+        { id: 'time_period_start', title: 'time_period_start' },
+        { id: 'time_period_end', title: 'time_period_end' },
+    ];
 
-    const rewards = inflationBalanceChanges.concat(jitoRewards);
-    const rewardsUSD = fetchAndConvertToUSD(rewards);
-    console.log(rewardsUSD);
+    const csvWriter = createObjectCsvWriter({
+        path: file_path,
+        header: csvHeader,
+        append: fs.existsSync(file_path), // Set append to true to append data to the existing file
+    });
+
+    csvWriter.writeRecords(balanceChangesUSD)
+        .then(() => {
+            console.log('Reward appended to CSV file successfully');
+        })
+        .catch((error) => {
+            console.error('Error appending reward to CSV file:', error);
+        });
 }
-// async function main(pubkey: PublicKey) {
-//     //  signature of each transaction tx = (message, signature ), UNIQUE identifier of the tx, use to query tx
-//     const signatures = await getTransactionHistory(pubkey);
-//     // get the actual tx
-//     const transactions = await getTransactions(signatures);
-//     const balanceChanges = getBalanceChanges(pubkey, transactions);
-//     console.log(balanceChanges);
 
+async function main(pubkey: PublicKey, maxEpochinfile: number, latestSignature: string | null) {
+    const inflationRewards = await getNewInflationRewards(pubkey, maxEpochinfile);
+    const inflationBalanceChanges = convertInflationRewards(inflationRewards);
+    const inflationBalanceChangesUSD = await fetchAndConvertToUSD(inflationBalanceChanges);
+    writeBalanceChangesUSDToCsv(inflationBalanceChangesUSD, 'inflation_rewards.csv');
 
-//     console.log('fetching from coinAPI...');
-//     const apiKey = process.env.API_KEY;
-//     const apiUrl = 'https://rest.coinapi.io/v1/ohlcv/COINBASE_SPOT_SOL_USD/history'
-//     for (var balanceChange of balanceChanges) {
-//         const time_start = balanceChange.blocktime;
-//         const args = {
-//             headers: { "X-CoinAPI-Key": apiKey },
-//             params: {
-//                 "period_id": "1HRS",
-//                 "time_start": time_start,
-//             }
-//         };
-
-//         const response = await fetchData(apiUrl, args)
-//         if (!response) { throw new Error("failed to retrieve candle"); }
-//         if (response.length === 0) { throw new Error("no data for time"); }
-
-//         const data = response[0]; // take the first candle
-//         const time_period_start = new Date(data.time_period_start);
-//         const time_period_end = new Date(data.time_period_end);
-//         const price = 0.25 * (data.price_open + data.price_close + data.price_high + data.price_low);
-//         const value_in_usd = balanceChange.balance_delta * price / LAMPORTS_PER_SOL;
-
-//         const balanceChangeUSD = new BalanceChangeUSD(balanceChange, time_period_start, time_period_end, price, value_in_usd)
-//         console.log(balanceChangeUSD);
-//     }
-// }
+    const jitoBalanceChanges = await getJitoBalanceChanges(pubkey, latestSignature);
+    const jitoBalanceChangesUSD = await fetchAndConvertToUSD(jitoBalanceChanges);
+    writeBalanceChangesUSDToCsv(jitoBalanceChangesUSD, 'jito_rewards.csv');
+}
 
 try {
     const cli = new CLI();
     const pubkey = new PublicKey(cli.address);
-    main(pubkey).then(result => {
+    main(pubkey, cli.maxEpochInCsv, cli.latestSignature).then(result => {
         console.log("success");
-        // fetchData("https://rest.coinapi.io/v1/symbols", { headers: { " X-CoinAPI-Key": apiKey } }).then(data => {
-        //     for (var symbol of data) {
-        //         if (symbol.symbol_type !== 'SPOT') { continue; }
-        //         if (!symbol.symbol_id.includes("SOL")) { continue; }
-        //         if (!symbol.symbol_id.includes("USD")) { continue; }
-        //         console.log(symbol);
-        //     }
-        // });
     })
 
 } catch (error: any) {
