@@ -1,12 +1,14 @@
 {
   "devDependencies": {
     "@types/node": "^20.4.7",
+    "@types/yargs": "^17.0.24",
     "typescript": "^5.0.4"
   },
   "dependencies": {
     "@solana/web3.js": "^1.75.0",
     "axios": "^1.4.0",
     "csv-writer": "^1.6.0",
-    "ts-node": "^10.9.1"
+    "ts-node": "^10.9.1",
+    "yargs": "^17.7.2"
   }
 }

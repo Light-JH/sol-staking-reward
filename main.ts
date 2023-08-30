@@ -1,8 +1,9 @@
 import { Connection, PublicKey, GetVersionedTransactionConfig, ParsedTransactionWithMeta, LAMPORTS_PER_SOL, EpochSchedule } from '@solana/web3.js';
-import { NumericLiteral } from 'typescript';
 import axios from 'axios';
 import * as fs from 'fs';
 import { createObjectCsvWriter } from 'csv-writer';
+import yargs, { Arguments } from 'yargs';
+import { exit } from 'process';
 
 
 // this is where the tips come from
@@ -116,6 +117,7 @@ function getBalanceChanges(pubkey: PublicKey, transactions: ParsedTransactionWit
 
 async function fetchAndConvertToUSD(balanceChanges: BalanceChange[]) {
     console.log('fetching from coinAPI...');
+    console.log(balanceChanges);
     const apiKey = process.env.API_KEY;
     const apiUrl = 'https://rest.coinapi.io/v1/ohlcv/COINBASE_SPOT_SOL_USD/history'
     var balanceChangesUSD = [];
@@ -249,9 +251,35 @@ async function main(pubkey: PublicKey, maxEpochinfile: number, latestSignature: 
 }
 
 try {
-    const cli = new CLI();
-    const pubkey = new PublicKey(cli.address);
-    main(pubkey, cli.maxEpochInCsv, cli.latestSignature).then(result => {
+    const argv = yargs
+        .option('address', {
+            description: 'Wallet address to get rewards for',
+            type: 'string',
+            demandOption: true,
+        })
+        .option('latest-epoch', {
+            description: 'Specify the latest epoch',
+            type: 'number', // Change the type to match your use case
+            demandOption: true,
+        })
+        .option('jito-latest-signature', {
+            description: 'Specify the latest signature',
+            type: 'string', // Change the type to match your use case
+            demandOption: false,
+        })
+        .help() // Include --help option for displaying help information
+        .argv as Arguments<{
+            'address': string;
+            'jito-latest-signature': string;
+            'latest-epoch': number;
+        }>;
+
+    const addressString = argv['address'];
+    const address = new PublicKey(addressString);
+    const latestEpoch = argv['latest-epoch'];
+    const jitoLatestSignature = argv['jito-latest-signature'];
+
+    main(address, latestEpoch, jitoLatestSignature).then(result => {
         console.log("success");
     })
 
