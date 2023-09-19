@@ -118,7 +118,7 @@ function getBalanceChanges(pubkey: PublicKey, transactions: ParsedTransactionWit
 async function fetchAndConvertToUSD(balanceChanges: BalanceChange[]) {
     console.log('fetching from coinAPI...');
     console.log(balanceChanges);
-    const apiKey = process.env.API_KEY;
+    const apiKey = process.env.COIN_API_KEY;
     const apiUrl = 'https://rest.coinapi.io/v1/ohlcv/COINBASE_SPOT_SOL_USD/history'
     var balanceChangesUSD = [];
     for (var balanceChange of balanceChanges) {
